@@ -1,0 +1,171 @@
+import { mount, signal, Text, View } from "nsh";
+import { SafeAreaView } from "nsh/ui/mobile";
+
+// 简化版 FSRS 风格调度（PoC）：每张卡只存 stability（天）。
+// 新卡首评：Again 重排队 / Hard 1 天 / Good 2.5 天 / Easy 4 天
+// 复习卡：Hard ×1.3 / Good ×2.6 / Easy ×3.8，Again 重置为 1 天并重排队
+type Card = { id: number; front: string; back: string; phonetic: string };
+
+const CARDS: Card[] = [
+  { id: 1, front: "serendipity", phonetic: "/ˌserənˈdɪpəti/", back: "意外发现美好事物的运气；机缘巧合" },
+  { id: 2, front: "deadline", phonetic: "/ˈdedlaɪn/", back: "截止日期；最后期限" },
+  { id: 3, front: "ubiquitous", phonetic: "/juːˈbɪkwɪtəs/", back: "无处不在的；普遍存在的" },
+  { id: 4, front: "pragmatic", phonetic: "/præɡˈmætɪk/", back: "务实的；实用主义的" },
+  { id: 5, front: "deadlock", phonetic: "/ˈdedlɒk/", back: "僵局；死胡同" },
+  { id: 6, front: "resilient", phonetic: "/rɪˈzɪliənt/", back: "有韧性的；能快速恢复的" },
+];
+
+type S = { queue: number[]; stab: Record<number, number>; done: number; lapse: number };
+
+const init = (): S => ({ queue: CARDS.map((c) => c.id), stab: {}, done: 0, lapse: 0 });
+
+function App() {
+  const state = signal<S>(init());
+  const flipped = signal(false);
+
+  function fmtDays(d: number): string {
+    if (d < 1) return `${Math.round(d * 24 * 60)}分钟`;
+    return `${Math.round(d * 10) / 10}天`;
+  }
+
+  // 当前卡的 stability（0 = 新卡）
+  function curStab(): number {
+    const s = state();
+    return s.stab[s.queue[0]] ?? 0;
+  }
+
+  // 四档下次间隔（天）
+  function interval(grade: "again" | "hard" | "good" | "easy"): number {
+    const s = curStab();
+    if (grade === "again") return 10 / 1440; // 10 分钟
+    if (s === 0) return grade === "hard" ? 1 : grade === "good" ? 2.5 : 4;
+    return grade === "hard" ? s * 1.3 : grade === "good" ? s * 2.6 : s * 3.8;
+  }
+
+  function grade(g: "again" | "hard" | "good" | "easy") {
+    const s = state();
+    const cur = s.queue[0];
+    const rest = s.queue.slice(1);
+    const stab = { ...s.stab };
+    if (g === "again") {
+      stab[cur] = 1;
+      state.set({ queue: [...rest, cur], stab, done: s.done, lapse: s.lapse + 1 });
+    } else {
+      stab[cur] = interval(g);
+      state.set({ queue: rest, stab, done: s.done + 1, lapse: s.lapse });
+    }
+    flipped.set(false);
+  }
+
+  function GradeBtn(props: { g: "again" | "hard" | "good" | "easy"; label: string; color: string }) {
+    return (
+      <View
+        testID={`grade-${props.g}`}
+        onPress={() => grade(props.g)}
+        activeOpacity={0.6}
+        accessibilityRole="button"
+        accessibilityLabel={props.label}
+        style={{
+          flex: 1,
+          margin: 5,
+          borderRadius: 14,
+          height: 64,
+          backgroundColor: props.color,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Text style={{ color: "#ffffff", fontSize: 15, fontWeight: "600" }}>{props.label}</Text>
+        <Text testID={`int-${props.g}`} style={{ color: "#ffffff", fontSize: 12, opacity: 0.85 }}>
+          {fmtDays(interval(props.g))}
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#0b1220", paddingHorizontal: 18, paddingTop: 12, paddingBottom: 20 }}>
+      <Text style={{ color: "#8ea2c9", fontSize: 14 }}>
+        英语核心词 · 还剩 {state().queue.length} 张 · 已完成 {state().done} 张
+      </Text>
+
+      {state().queue.length === 0 ? (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+          <Text testID="done-title" style={{ color: "#ffffff", fontSize: 30, fontWeight: "700" }}>
+            本组完成 🎉
+          </Text>
+          <Text style={{ color: "#8ea2c9", fontSize: 16, marginTop: 12 }}>
+            共复习 {state().done} 张，重来 {state().lapse} 次
+          </Text>
+          <View
+            testID="restart-btn"
+            onPress={() => { state.set(init()); flipped.set(false); }}
+            activeOpacity={0.6}
+            accessibilityRole="button"
+            accessibilityLabel="再来一组"
+            style={{ marginTop: 28, backgroundColor: "#2f6fed", borderRadius: 14, paddingVertical: 36, paddingHorizontal: 36 }}
+          >
+            <Text style={{ color: "#ffffff", fontSize: 17, fontWeight: "600" }}>再来一组</Text>
+          </View>
+        </View>
+      ) : (
+        <View style={{ flex: 1 }}>
+          <View
+            style={{
+              flex: 1,
+              marginTop: 18,
+              backgroundColor: "#16213a",
+              borderRadius: 20,
+              alignItems: "center",
+              justifyContent: "center",
+              paddingHorizontal: 20,
+            }}
+          >
+            <Text testID="card-front" style={{ color: "#ffffff", fontSize: 36, fontWeight: "700" }}>
+              {CARDS.find((c) => c.id === state().queue[0])!.front}
+            </Text>
+            <Text style={{ color: "#8ea2c9", fontSize: 16, marginTop: 6 }}>
+              {CARDS.find((c) => c.id === state().queue[0])!.phonetic}
+            </Text>
+            {flipped() ? (
+              <Text testID="card-back" style={{ color: "#ffd479", fontSize: 20, marginTop: 26, textAlign: "center" }}>
+                {CARDS.find((c) => c.id === state().queue[0])!.back}
+              </Text>
+            ) : (
+              <Text style={{ color: "#54678c", fontSize: 14, marginTop: 26 }}>先在心里想出意思，再看答案</Text>
+            )}
+          </View>
+
+          {flipped() ? (
+            <View style={{ flexDirection: "row", marginTop: 14 }}>
+              <GradeBtn g="again" label="重来" color="#d9534f" />
+              <GradeBtn g="hard" label="困难" color="#e8a13a" />
+              <GradeBtn g="good" label="记得" color="#2f9e6e" />
+              <GradeBtn g="easy" label="简单" color="#2f6fed" />
+            </View>
+          ) : (
+            <View
+              testID="flip-btn"
+              onPress={() => flipped.set(true)}
+              activeOpacity={0.6}
+              accessibilityRole="button"
+              accessibilityLabel="显示答案"
+              style={{
+                marginTop: 14,
+                backgroundColor: "#2f6fed",
+                borderRadius: 14,
+                height: 56,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text style={{ color: "#ffffff", fontSize: 17, fontWeight: "600" }}>显示答案</Text>
+            </View>
+          )}
+        </View>
+      )}
+    </SafeAreaView>
+  );
+}
+
+mount(App);

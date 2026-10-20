@@ -1,0 +1,11 @@
+{
+  "id": "com.example.ankicards",
+  "name": "anki-cards",
+  "short_name": "anki-cards",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": []
+}
